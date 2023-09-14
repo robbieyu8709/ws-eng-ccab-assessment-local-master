@@ -1,8 +1,12 @@
 import express from "express";
 import { createClient } from "redis";
 import { json } from "body-parser";
+import { Mutex } from 'async-mutex';
+
 
 const DEFAULT_BALANCE = 100;
+const mutex = new Mutex();
+
 
 interface ChargeResult {
     isAuthorized: boolean;
@@ -28,23 +32,33 @@ async function reset(account: string): Promise<void> {
 }
 
 async function charge(account: string, charges: number): Promise<ChargeResult> {
-    const client = await connect();
+    const release = await mutex.acquire();
+
     try {
-        const balance = parseInt((await client.get(`${account}/balance`)) ?? "");
-        console.log(`Initial balance for account ${account}: ${balance}`);
-        console.log(`Charge amount for account ${account}: ${charges}`);
-        
-        if (balance >= charges) {
-            await client.set(`${account}/balance`, balance - charges);
-            const remainingBalance = parseInt((await client.get(`${account}/balance`)) ?? "");
-            console.log(`Final balance for account ${account}: ${remainingBalance}`);
+        const client = await connect();
+        try {
+            const balanceStr = await client.get(`${account}/balance`);
+            const balance = balanceStr ? parseInt(balanceStr) : 0;
             
-            return { isAuthorized: true, remainingBalance, charges };
-        } else {
-            return { isAuthorized: false, remainingBalance: balance, charges: 0 };
+            console.log(`Initial balance for account ${account}: ${balance}`);
+            console.log(`Charge amount for account ${account}: ${charges}`);
+            
+            if (balance >= charges) {
+                await client.set(`${account}/balance`, balance - charges);
+                const remainingBalanceStr = await client.get(`${account}/balance`);
+                const remainingBalance = remainingBalanceStr ? parseInt(remainingBalanceStr) : 0;
+                
+                console.log(`Final balance for account ${account}: ${remainingBalance}`);
+                
+                return { isAuthorized: true, remainingBalance, charges };
+            } else {
+                return { isAuthorized: false, remainingBalance: balance, charges: 0 };
+            }
+        } finally {
+            await client.disconnect();
         }
     } finally {
-        await client.disconnect();
+        release();
     }
 }
 
