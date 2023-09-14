@@ -31,13 +31,28 @@ async function charge(account: string, charges: number): Promise<ChargeResult> {
     const client = await connect();
     try {
         const balance = parseInt((await client.get(`${account}/balance`)) ?? "");
+        console.log(`Initial balance for account ${account}: ${balance}`);
+        console.log(`Charge amount for account ${account}: ${charges}`);
+        
         if (balance >= charges) {
             await client.set(`${account}/balance`, balance - charges);
             const remainingBalance = parseInt((await client.get(`${account}/balance`)) ?? "");
+            console.log(`Final balance for account ${account}: ${remainingBalance}`);
+            
             return { isAuthorized: true, remainingBalance, charges };
         } else {
             return { isAuthorized: false, remainingBalance: balance, charges: 0 };
         }
+    } finally {
+        await client.disconnect();
+    }
+}
+
+async function getBalance(account: string): Promise<number> {
+    const client = await connect();
+    try {
+        const balance = parseInt((await client.get(`${account}/balance`)) ?? "0");
+        return balance;
     } finally {
         await client.disconnect();
     }
@@ -67,6 +82,11 @@ export function buildApp(): express.Application {
             console.error("Error while charging account", e);
             res.status(500).json({ error: String(e) });
         }
+    });
+    app.get('/balance/:account', async (req, res) => {
+        const { account } = req.params;
+        const balance = await getBalance(account);
+        res.send({ balance });
     });
     return app;
 }
